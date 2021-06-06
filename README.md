@@ -1,9 +1,11 @@
 ## Correlation between traffic accidents and location
+
 **Project for Spatial Analytics, Cultural Data Science 2021** 
+
 _Johanne Brandhøj Würtz_  
 
 **Introduction**
-This repository contains my exam projec for my Spatial Analytics class in Cultural Data Science.
+n/This repository contains my exam projec for my Spatial Analytics class in Cultural Data Science.
 
 **Software Framework**
 The code for this project is written on my MacBook macOS, version 10.15.7. I installed the desktop version of R (4.1.0) and RStudio (1.4.1106). The project uses the following packages: tidyverse, sf, rgdal, leaflet, spatstat, maptools, sp and raster. See the Session Info chunk in the end of the script (Traffic_accidents.Rmd) for more details about the individual packages and versions. 
