@@ -2,17 +2,20 @@
 
 **Project for Spatial Analytics, Cultural Data Science 2021** 
 
-_Johanne Brandhøj Würtz_  
+_By: Johanne Brandhøj Würtz_  
 
 **Introduction**
-n/This repository contains my exam projec for my Spatial Analytics class in Cultural Data Science.
+
+This repository contains my exam projec for my Spatial Analytics class in Cultural Data Science.
 
 **Software Framework**
+
 The code for this project is written on my MacBook macOS, version 10.15.7. I installed the desktop version of R (4.1.0) and RStudio (1.4.1106). The project uses the following packages: tidyverse, sf, rgdal, leaflet, spatstat, maptools, sp and raster. See the Session Info chunk in the end of the script (Traffic_accidents.Rmd) for more details about the individual packages and versions. 
 
 The data containing information about the traffic accidents, the locations and which type of accident it is, are in a mapinfo format. This means that the data contains a number of files (shp, qpj, cpg etc.), all of which must be present before the data works optimally. 
 
 **Data License** 
+
 This project has a MIT License, for more information see LICENSE file. 
 
 This project uses data from: 
