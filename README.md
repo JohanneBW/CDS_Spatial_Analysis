@@ -6,7 +6,7 @@ _By: Johanne Brandhøj Würtz_
 
 **Introduction**
 
-This repository contains my exam projec for my Spatial Analytics class in Cultural Data Science.
+This repository contains my exam projec for my Spatial Analytics class in Cultural Data Science. My project deals with the connection between traffic accidents in relation to spatially clustered data points.
 
 **Software Framework**
 
