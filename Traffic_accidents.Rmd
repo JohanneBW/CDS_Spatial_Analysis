@@ -1,0 +1,221 @@
+---
+title: "Correlation between traffic accidents"
+output: html_document
+author: "Johanne Brandhøj Würtz"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries, results='hide'}
+library(tidyverse)
+library(sf)
+library(rgdal)
+library(leaflet)
+library(spatstat)
+library(maptools)
+library(sp)
+library(raster)
+```
+
+The first thing I do is reading in the data for traffic accidents in Viborg Kommune and municipal bounderies in Denmark.
+
+```{r Read the data}
+#Read the shapefile with the poins of traffic accidents and save it as accidents_shp
+accidents_shp <- readOGR("data/Uheld-Shape.shp")
+
+#Read the data containing the municipalities in Denmark and save it as mun_rds
+mun_rds <- readRDS("data/gadm36_DNK_2_sp.rds")
+
+#I use plot() to view the data and make sure it is loaded successfully 
+plot(mun_rds)
+plot(accidents_shp)
+```
+The next thing we do, is check out our data, its form and attributes.
+
+```{r data check}
+#I use class() to get information about what kind of data I am dealing with
+
+class(accidents_shp)
+#The data is a SpatialPointsDataFrame, this means that each row in the data frame is a point 
+
+class(mun_rds)
+#The data is a SpatialPolygonsDataFrame, this means that the data contains polygons
+
+#To get more information about the SpatialPointsDataFrame and the SpatialPolygonsDataFrame, I use the crs()
+
+crs(accidents_shp)
+#I can see that the data is a UTM32 projection (Universal Transverse Mercator), UTM zone 32 is often used for the Northern Hemisphere which is were Denmark is located. I am working with a projection so the measures are in meters. Furthermore, it uses the GRS80 ellipsoid (Geodetic Reference System 1980).
+
+crs(mun_rds)
+#The data is a 'longlat' projection and uses the WGS84 datum. This means the projections measures are in degrees based on longitude and latitude.  
+
+```
+I am only interested in the area of the municipality of Viborg and therefore I need to extract this polygon from the mun_rds polygons.
+
+```{r locate area of interest, results='hide'}
+#I am only interested in one of the municipalities (the municipality of Viborg) as this is where my traffic accident data are located. I use attributes() to get a look at the data frame.  
+attributes(mun_rds) 
+```
+
+```{r extract area of interest}
+#I specify the polygon I want to plot by using the name of the municipality I am interested in. It's the column called NAME_2 that contains the names of the municipalities.
+mun_Viborg <- mun_rds[mun_rds$NAME_2 == 'Viborg',]
+
+#I plot the polygon to make sure it looks correct
+plot(mun_Viborg)
+```
+
+
+```{r PPP}
+#I need to transform the mun_rds into a projection before I can create my owin (observation window)
+mun_Viborg <- spTransform(mun_Viborg, CRS("+init=epsg:32632"))
+#I use the same UTM zone as in the accidents_shp. The UTM32N zone is translated into ESPG:32632
+
+#Make the SpatialPolygon of the municipality of Viborg into an owin
+munOwin <- as.owin(mun_Viborg)
+#Check the class to make sure the munOwin is a "owin"
+class(munOwin)
+
+#Extract coordinates from our SpatialPointsDataFrame
+accidents_points <- coordinates(accidents_shp)
+head(accidents_points)
+
+#I create my p with our accident_points and munOwin 
+P <- ppp(accidents_points[,1], accidents_points[,2], window=munOwin)
+#I get the message that there is one illegal point. The point is illegal because it is located outside our polygon. This may be due to a accident happening by the municipal boundary so the accident is in the data, but not inside the municipal boundary. It can also be the fact that the polygon and the points are from two different files and there may be a difference in where the actual boundary is set to be.  
+
+#Check the class to make sure the p is a "ppp"
+class(P)
+#View the p using plot()
+plot(P)
+
+#I will now look at the density
+density <- density(P)
+#I check the class. We want it to be a "im"
+class(density)
+#Plot the density
+plot(density, main='traffic accident density')
+#When looking at the density, the most accidents are located in the middle of the municipality polygon. There is also a slightly brighter color at the bottom right corner of the polygon. Later on, I will compare this information with the places matching the actual locations for the brightest spots on the polygon. 
+```
+The next step is to find the K value. The K-function is defined as the expected number of points within a distance of a point of the process, scaled by the intensity. We use K to determine if the points have complete spatial randomness or if there are any clustering.
+
+The x-axis represents the scales of clustering considered and the y-axis represents the K-function value. When the observed K has a higher value than the confidence intervals surrounding the expected K, it implies there is greater than expected (for complete spatial randomness) clustering in the points frequency values at that spatial scale.
+
+```{r Estimate K value}
+
+K <- Kest(P, correction="Ripley")
+plot(K, xlab="d(m)", ylab="K(d)")
+# The red dashed line is the expected K value which is computed for a complete spatial randomness process. The black solid line is estimated from our accident point data.
+
+```
+
+The K-function makes it difficult to graphically distinguish differences between the expected and estimated values. A way to solve this is to transform the data with the estimated L-function. 
+
+```{r Estimate L value}
+L <- Lest(P,correction="Ripley")
+plot(L, xlab="d(m)", ylab="K(d)")
+
+# The expected line is now straight. I can clean it further by setting the expected line to 0 on the y-axis.To plot the modified L-function, I subtract the distance band r from the L values.
+
+OP <- par(mar=c(5,5,4,4))
+# I need to modify the plot graphics parameters to accommodate the y-label. I therefore use 'par' which is used to set or query graphical parameters.
+ plot(L, . -r ~ r, ylab=expression(hat("L")), xlab = "d (m)")
+par(OP)
+
+# At distances where L is greater than 0, there are more points at the corresponding distance than would be expected under complete spatial randomness.At a distance where L is less than 0, there are fewer points at the corresponding distance than would be expected under complete spatial randomness. L values greater than 0 indicate spatial attraction of events, which means clustering, and negative values indicate spatial repulsion, which means dispersion.
+
+```
+Even though the graph is visually easy to decode, the problem in comparing the expected value to the estimated value is that it does not provide us with a level of significance of dispersion or clustering. A Monte Carlo simulation will solve this limitation.
+
+```{r Monte Carlo}
+# Before running the Monte Carlo simulation, I define the number of iterations I wish to process. This is the number of simulated point patterns to be generated when computing the envelopes
+n <- 99 # 99 iterations is also the default number
+
+# I now add the envelope, which performs simulations and computes envelopes of a summary statistic based on the simulations.The envelopes can be used to assess the goodness-of-fit of a point process model to point pattern data.
+env <- envelope(P[munOwin], Lest, nsim=n)
+OP <- par(mar=c(5,5,4,4))
+ plot(env, . - r ~ r, ylab=expression(hat("L")),xlab="d (m)")
+par(OP)
+
+# The simulation mean and the established simulation envelopes shows whether the observed pattern is statistically significant or not.
+
+```
+
+
+I now have a clear visualization of the graph including the level of significance based on 99 iterations.  
+I am interested in if the point pattern data with the traffic accidents are spatial clustered or if the points indicate complete spatial randomness. At distances where L is greater than 0, there are more points at the corresponding distance than would be expected under complete spatial randomness. In other words, L values greater than 0 indicate spatial attraction of events, therefore clustering.
+
+The graph clearly shows that this is clustered data as the graph at all distances is higher than the significance level that encloses our expected value at complete spatial randomness. 
+
+If the graph, on the other hand, had been very volatile in its L value and crossed the line for the expected value, then the L value had been more fluctuating depending on the value of the x-axis. In such a case, it is an advantage to do simulated tests comparing the actual data with simulated data with points placed with complete spatial randomness.
+As this is not necessary for the graph, I will instead make a map of the municipality and the points that indicate an accident. I do this because a map will help me gain an understanding of why the data is so clustered, as I will be able to see it in relation to the density image and where the places for most of the accidents are located.
+
+
+```{r data transformation, results='hide'}
+# Reprojecting the coordinates to the CRS code EPSG: 4326 will allow me to plot the traffic accidents to a leaflet map. 
+
+#At the moment I am dealing with a UTM projection in the data about trafic accidents. The coordinates are in northing and easting.
+coordinates(spTransform(accidents_shp, CRS("+init=epsg:32632")))
+
+#Typing the following will transform the projection into being geographic with longitude and latitude. It will also match the projection of the municipalities in the mun_rds data.
+coordinates(spTransform(accidents_shp, CRS("+init=epsg:4326")))
+ 
+```
+I am now interested in seeing the data on a map as this will help me analyze how and why our data are clustered. 
+
+```{r leaflet map}
+
+# I first define accidents_points and municipal_poly from the transformed accidents_shp and mun_Viborg
+accidents_points <- spTransform(accidents_shp, CRS("+init=epsg:4326"))
+municipal_poly <- spTransform(mun_Viborg, CRS("+init=epsg:4326"))
+
+# I define the color palette to consist of the three colors yellow, orange and red. These colors are arranged in order to match the three types of accidents in the data. Anmsuh refers to "other material damage", Mskduh which is "material damage" and Pskduh which is "personal injury".    
+pal <- colorFactor(c("yellow", "orange", "red"), domain = accidents_points$UHELDSART)
+# The accidents are in hierarchical order according to which is most severe. The Pskduh is the most severe type of accident and will be marked with red on the map, Mskduh is the second most severe type of accident, and it will be marked with orange. Anmsuh is the least severe type of accident, and it will be marked by yellow.
+
+Traffic_accident_map <- leaflet() %>%
+  # I will use the default map tiles
+  addTiles() %>% 
+  # Set the view to Viborg which is the largest city in the municipality
+  setView(lng = 9.1039826, lat = 56.4496293, zoom = 10)%>%
+  # Add the municipal boundary  
+  addPolygons(data = municipal_poly)%>%
+  # Add markers with type of accident, year and matching colors
+  addCircleMarkers(data = accidents_points, 
+                   label = paste0("Type of traffic accident: ", accidents_points$UHELDSART,",", "\n",
+                                  "Year: ", accidents_points$AAR),
+                   # Add color based on tupe of accident
+                   color = ~pal(UHELDSART),
+                   radius = 2,
+                   fillOpacity = 1)%>%
+  # Add a minimap
+  addMiniMap(toggleDisplay = TRUE, position = "bottomright")%>%
+  # Add measure
+  addMeasure(position = "bottomleft",
+    primaryLengthUnit = "meters",
+    primaryAreaUnit = "sqmeters")
+Traffic_accident_map
+
+```
+
+When looking at the map it is clear to see why the density image looked like it did. By having plotted the traffic accidents, one can see that it is especially the city of Viborg where most of the accidents happen. Viborg city is also the largest city in the Municipality, so intuitively it makes good sense that the city with the most inhabitants is the city with the most traffic accidents. Then there is the town of Bjerringbro, where there are clearly many traffic accidents. Again, Bjerringbro is the second largest city in the municipality, so it is not surprising that we get these results. Another aspect that is central to the map is that you can sense that most of the accidents happen on the main roads and the major thoroughfares in the municipality. It is also clear that most accidents are of the type Anmsuh which is the least severe type of accident marked by yellow. 
+
+When looking at the sums of accidents distributed on type, I get the following results:
+```{r Sum of accidents}
+sum(accidents_points$UHELDSART == 'Anmsuh') # 393 accidents
+sum(accidents_points$UHELDSART == 'Pskduh') # 155 accidents
+sum(accidents_points$UHELDSART == 'Mskduh') # 136 accidents 
+```
+There are most accidents with "other material damages", second most accidents with "personal injuries" and least accidents with "material damages". 
+
+I can conclude that there is a connection between the traffic accidents that result in a high degree of data clusters. This fact can help prevent similar accidents from happening again, as it is clear that there is a connec-tion between the different locations where the accidents happen. This would not have been possible if the data had been dominated by tendencies towards complete spatial randomness.
+The next step for the project may be to focus on what similarities there are for the roads, how many traffic accidents occur and what characterizes them. Whether it is often in connection with an intersec-tion or whether it happens especially within the city limits. It is acquisition of knowledge that would help to gain a greater understanding of traffic accidents as well as a stronger background for accident prevention.
+
+```{r Session Info}
+# Prints out information about individual packages and versions
+sessionInfo()
+```
+
